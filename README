@@ -1,0 +1,9 @@
+Creating database :
+sudo su
+sudo postgres  (above 8.3 only)
+createdb -W -O crawler -U crawler crawlerdb  (password "crawler" --> can also be to your choice.then don't forget to change in mediawords.yml)
+psql -f (loaction_of_project_dir/mediawords.sql) -U crawler -d crawlerdb
+
+
+seeds.txt  contains new line seperated urls list 
+
