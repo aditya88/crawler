@@ -23,6 +23,8 @@ use Fetcher;
 use Handler;
 use Provider;
 
+
+
 sub new
 {
     my ( $class ) = @_;
@@ -89,7 +91,7 @@ sub _run_fetcher
 				print $download->{downloads_id}." is the download  provided for fetcher";
                 my $response = $fetcher->fetch_download( $download );
                 $handler->handle_response( $download, $response );
-
+				
                 print STDERR "fetcher " . $self->fetcher_number . " get downloads_id: '$downloads_id' " .
                   $download->{ url } . " complete\n";
             }

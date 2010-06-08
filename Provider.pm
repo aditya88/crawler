@@ -14,6 +14,7 @@ use DB;
 use Downloads_Queue;
 use Readonly;
 use Perl6::Say;
+use Digest::MurmurHash;
 
 # how often to download each feed (seconds)
 use constant STALE_FEED_INTERVAL => 3 * 14400;
@@ -85,6 +86,9 @@ sub _setup
 		{
 		# print data out before storing
 		my $url= $_;
+		$url = URI->new($url)->canonical;
+		$url = $url->scheme( )."://".$url->host( ).":".$url->port( ).$url->path( )."?".$url->query( ) ;
+		$url = URI->new($url)->canonical;
 		print "url is ".$url."\n";
 		print "host is ".lc( ( URI::Split::uri_split( $url ) )[ 1 ] )."\n";
 		$self->engine->dbs->create(
@@ -92,13 +96,13 @@ sub _setup
                     {
 	                parent        => 0,
 	                url           => $url,
-	                host          => lc( ( URI::Split::uri_split( $url ) )[ 1 ] ),
+	                host          => $url->host(),
 	                type          => 'archival_only',
 	                sequence      => 0,
 	                state         => 'queued',
 	                download_time => 'now()',
 	                extracted     => 'f',
-	                md5_hash      => md5($url)
+	                mm_hash_url   => Digest::MurmurHash::murmur_hash($url)
 	                }
 					 );
 		 }
@@ -185,9 +189,6 @@ sub _add_stale_feeds
                 extracted     => 'f'
             }
         );
-
-# removing all related to feeds
-#       $download->{ _media_id } = $feed->{ media_id };
 
         $self->{ downloads }->_queue_download( $download );
 =comment removing all related to feeds
@@ -351,7 +352,7 @@ sub provide_downloads
     my ( $self ) = @_;
     sleep( 1 );
     $self->_setup();
-
+    
     $self->_timeout_stale_downloads();
     
     $self->_add_stale_feeds();

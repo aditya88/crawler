@@ -4,8 +4,6 @@ package Handler;
 # * store the download in the database,
 # * store the response content in the fs,
 # * parse the response content to generate more downloads (eg. story urls from a feed download)
-# * parse the response content to add story text to the database
-
 use strict;
 use warnings;
 
