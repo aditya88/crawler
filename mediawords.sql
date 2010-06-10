@@ -17,8 +17,6 @@ create table downloads (
     extracted           	boolean         	not null default 'f',
     mm_hash_url         	varchar(10)     	null,
     mm_hash_location            varchar(10)     	null,
-    location_of_dup_copy        text			null,
-    last_modified		time                    null,
     download_id_of_old_copy     int			null       
 );
 

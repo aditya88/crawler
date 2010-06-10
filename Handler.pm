@@ -22,14 +22,14 @@ use Perl6::Say;
 use List::Util qw (max maxstr);
 use HTML::LinkExtractor;
 use URI::URL;
-
+use Digest::MurmurHash;
+use URI::Escape;
 use Downloads;
 
 # CONSTANTS
 
 # max number of pages the handler will download for a single story
 use constant MAX_PAGES => 10;
-
 # STATICS
 
 my $_feed_media_ids     = {};
@@ -66,6 +66,25 @@ sub _restrict_content_type
     $response->content( '(unsupported content type)' );
 }
 
+sub standardize_url
+{
+        my ( $url ) = @_;
+        $url = URI->new($url)->canonical;
+        my $new_url = $url->scheme()."://".$url->host().":".$url->port().$url->path();
+        if (!defined ($url->host()))
+        {
+        	return "";
+        }
+        
+        if (defined ($url->query()))
+        {
+                $new_url = $new_url.'?'.$url->query();
+        }
+        $url = URI->new($new_url);
+        my $encoded_url = uri_escape($url);
+        return ($encoded_url) ;
+}
+
 # call get_page_urls from the pager module for the download's feed
 sub _call_pager
 {
@@ -86,7 +105,7 @@ sub _call_pager
     }
 
     my $validate_url = sub { !$dbs->query( "select 1 from downloads where url = ?", $_[ 0 ] ) };
-    
+
     my $content = $response->content;
     my $base = $response->base;
     my @links = ();
@@ -98,20 +117,19 @@ sub _call_pager
     
     for (my $i=0;$i < @tags;$i++){ if (defined $tags[$i]->{href}) {push(@links,$tags[$i]->{href}); } }
     @links = map { $_ = url($_, $base)->abs; } @links;
-    
+    @links = map { $_ = standardize_url($_) } @links;
     my %hash_links   = map { $_, 1 } @links;
     my @unique_links = keys %hash_links;
     
     my $j=0;
     foreach $j (@unique_links) 
     {
-    	
 		     	$dbs->create(
 		            'downloads',
 		            {
 		                parent        => $download->{ downloads_id },
 		                url           => $j,
-		                host          => lc( ( URI::Split::uri_split( $j ) )[ 1 ] ),
+		                host          => lc( ( URI::Split::uri_split( uri_unescape($j) ) )[ 1 ] ),
 		                type          => 'archival_only',
 		                sequence      => $download->{ sequence } + 1,
 		                state         => 'pending',
@@ -119,12 +137,9 @@ sub _call_pager
 		                extracted     => 'f'
 		            }
 		        );
-    	     
-    	
     }
     $download ->{ extracted } = 't';
     $download->{ state } = 'success';
-    print "made success";
     $dbs->update_by_id( "downloads", $download->{ downloads_id }, $download );
                    
 =comment
@@ -159,7 +174,6 @@ sub _call_pager
 sub _process_content
 {
     my ( $self, $download, $response ) = @_;
-
     $self->_call_pager( $download, $response );
 
     #MediaWords::Crawler::Parser->get_and_append_story_text
@@ -167,11 +181,11 @@ sub _process_content
     #$download->stories_id, $response->decoded_content);
 }
 
-
 sub handle_response
 {
-    my ( $self, $download, $response ) = @_;
+    my ( $self, $download, $cond, $response, $head ) = @_;
 
+    #say STDERR $cond ;
     #say STDERR "fetcher " . $self->engine->fetcher_number . " handle response: " . $download->{url};
 
     my $dbs = $self->engine->dbs;
@@ -191,24 +205,65 @@ sub handle_response
     $self->_restrict_content_type( $response );
 
     # say STDERR "fetcher " . $self->engine->fetcher_number . " starting reset";
-
     # may need to reset download url to the last redirect url
-    $download->{ url } = ( $response->request->url );
-
-    $dbs->update_by_id( "downloads", $download->{ downloads_id }, $download );
+    
+    #TODO decide whether to reset the download url to last requested or not
+    #presently not setting it back
+    #$download->{ url } = ( $response->request->url );
+    #$dbs->update_by_id( "downloads", $download->{ downloads_id }, $download );
 
     # say STDERR "switching on download type " . $download->{type};
-    switch ( $download->{ type } )
+    switch ( $cond )
     {
-        case ('archival_only'||'content')
+        case ('cond1')
         {
-            Downloads::store_content( $dbs, $download, \$response->decoded_content );
+        	if ( $download->{ sequence } > MAX_PAGES )
+    			{
+			        print "reached max pages (" . MAX_PAGES . ") for url " . $download->{ url } . "\n";
+			        return;
+    			}
+    		else
+    			{
+    				$download->{ download_id_of_old_copy } = $response -> { downloads_id } ;
+		            $download->{ location } = $head->request->url;
+		            #path is null $$ download success  implies --> content not modified 
+		            #$download->{ path } = $response->{ path };
+		            $download->{ mm_hash_location } = Digest::MurmurHash::murmur_hash($head->request->url);
+		            $download->{ state } = 'success';
+		            $dbs->update_by_id( "downloads", $download->{ downloads_id }, $download );
+    			}
+            
+        }
+        case ('cond2')
+        {
+        	Downloads::store_content( $dbs, $download, \$response->decoded_content );
+        	#path, is set and state updated to success
+        	$download->{ download_id_of_old_copy } = $response -> { downloads_id } ;
+            $download->{ location } = $response->request->url;
+            $download->{ mm_hash_location } = Digest::MurmurHash::murmur_hash($response->request->url);
+            $dbs->update_by_id( "downloads", $download->{ downloads_id }, $download );
+            $self->_process_content( $download, $response );
+        }
+        case ('cond3')
+        {
+        	#no need to download same location present in DB and considered as fresh copy
+        	#removing row
+        	$dbs->query("DELETE FROM downloads WHERE downloads_id=?",$download->{ downloads_id });
+        }
+        case ('cond4')
+        {
+        	Downloads::store_content( $dbs, $download, \$response->decoded_content );
+        	$download->{ location } = $response->request->url;
+        	$download->{ mm_hash_location } = Digest::MurmurHash::murmur_hash($response->request->url);
+        	$dbs->update_by_id( "downloads", $download->{ downloads_id }, $download );
             $self->_process_content( $download, $response );
         }
         else
         {
             die "Unknown download type " . $download->{ type }, "\n";
         }
+        
+        
     }
 }
 

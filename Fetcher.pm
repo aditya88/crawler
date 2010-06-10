@@ -45,14 +45,6 @@ sub do_fetch
 	}
     return $response;
 }
-sub standardize_url
-{
-	my ( $self, $url ) = @_;
-	$url = URI->new($url)->canonical;
-	$url = $url->scheme( )."://".$url->host( ).":".$url->port( ).$url->path( )."?".$url->query( ) ;
-	$url = URI->new($url);
-	return ($url) ;	
-}
 
 sub fetch_download
 {
@@ -64,43 +56,36 @@ sub fetch_download
     # so that the host throttling works as it should
     #print "fetcher " . $self->engine->fetcher_number . " download: " . $download->{url} . "\n";
     
-=comment
-    assume two cases
-    case-1 : url not present in db
-=cut
-
     my $download_head = do_fetch( $download, $dbs,"head");
-    my $hash = murmur_hash( $download_head->base );
+    my $hash = murmur_hash( Handler::standardize_url($download_head->base) );
     my @out ;
-    print "kool1";
     @out = $dbs -> query('SELECT * FROM downloads WHERE mm_hash_location=? ORDER  by downloads_id DESC',$hash )->hashes();
-    print "kool2";
     if ( int( @out ) == 0 )
     {
-    	# cond4  both  url and location not present in DB
+    	# cond4  both  url and location not present in DB make new download
     	return ('cond4', do_fetch( $download, $dbs,"content") );
     }
     else {
-        if ( time() - ( $out[0] -> { download_time } ) > FEED_NOT_STALE_FOR)
-        {
-        	if (str2time($download_head->header('last-modified')) < $out[0] -> { download_time } )
-        	{
-        		# download is stale  but content not modified
-        		# cond1 no download  required and path of the location is $out[0] -> { path }
-        		return ( 'cond1', $out[0] -> { downloads_id } );
-        	}
-        	else
-        	{
-        		# cond2 make new copy since download is stale and header is modiied
-        		return ( 'cond2', do_fetch( $download, $dbs,"content") );
-        	}
-        }
-        else 
-        {
-        	# cond3 no download  required and path of the location is $out[0] -> { path }
-        	return ( 'cond3', $out[0] -> { downloads_id } );
-        }
-    }
+	        if ( time() - ( $out[0] -> { download_time } ) > FEED_NOT_STALE_FOR)
+	        {
+	        	if (str2time($download_head->header('last-modified')) < $out[0] -> { download_time } )
+	        	{
+	        		# download is stale  but content not modified
+	        		# cond1 no download  required and path of the location is $out[0] -> { path }
+	        		return ( 'cond1', $out[0], $download_head);
+	        	}
+	        	else
+	        	{
+	        		# cond2 make new copy since download is stale and header is modiied
+	        		return ( 'cond2', do_fetch( $download, $dbs,"content") );
+	        	}
+	        }
+	        else 
+	        {
+	        	# cond3 no download  required and path of the location is $out[0] -> { path }
+	        	return ( 'cond3', $out[0] );
+	        }
+    	}
 }
 
 # calling engine
