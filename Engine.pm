@@ -22,8 +22,9 @@ use Data::Dumper;
 use Fetcher;
 use Handler;
 use Provider;
+use MServer;
 
-
+use constant PORT=>6666;
 
 sub new
 {
@@ -340,6 +341,14 @@ sub reconnect_db
     }
     $self->{ dbs } = DB->connect_to_db;
     $self->dbs->dbh->{ AutoCommit } = 0;
+}
+
+sub start_server
+{
+	my ( $self ) = @_;
+	my $port = PORT;
+	my $server = MServer->new($self);
+	$server->run(port => $port,host =>'localhost');
 }
 
 1;

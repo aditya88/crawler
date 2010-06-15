@@ -70,12 +70,12 @@ sub standardize_url
 {
         my ( $url ) = @_;
         $url = URI->new($url)->canonical;
-        my $new_url = $url->scheme()."://".$url->host().":".$url->port().$url->path();
+        
         if (!defined ($url->host()))
         {
         	return "";
         }
-        
+        my $new_url = $url->scheme()."://".$url->host().":".$url->port().$url->path();
         if (defined ($url->query()))
         {
                 $new_url = $new_url.'?'.$url->query();

@@ -1,4 +1,4 @@
-killall -s 9 postgres
+sudo killall -s 9 postgres
 #/etc/init.d/postgresql-8.4 stop
 /etc/init.d/postgresql-8.4 restart
 dropdb -U crawler crawlerdb 

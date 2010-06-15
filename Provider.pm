@@ -15,6 +15,7 @@ use Downloads_Queue;
 use Readonly;
 use Perl6::Say;
 use Digest::MurmurHash;
+use URI::Escape;
 
 # how often to download each feed (seconds)
 use constant STALE_FEED_INTERVAL => 3 * 14400;
@@ -60,7 +61,6 @@ sub new
 
     my $self = {};
     bless( $self, $class );
-
     $self->engine( $engine );
 
     $self->{ downloads } = Downloads_Queue->new();
@@ -86,17 +86,14 @@ sub _setup
 		{
 		# print data out before storing
 		my $url= $_;
-		$url = URI->new($url)->canonical;
-		$url = $url->scheme( )."://".$url->host( ).":".$url->port( ).$url->path( )."?".$url->query( ) ;
-		$url = URI->new($url)->canonical;
-		print "url is ".$url."\n";
-		print "host is ".lc( ( URI::Split::uri_split( $url ) )[ 1 ] )."\n";
+		chomp($url);
+        my $encoded_url = Handler::standardize_url($url);
 		$self->engine->dbs->create(
                     'downloads',
                     {
 	                parent        => 0,
-	                url           => $url,
-	                host          => $url->host(),
+	                url           => $encoded_url,
+	                host          => lc( ( URI::Split::uri_split( uri_unescape($encoded_url) ) )[ 1 ] ),
 	                type          => 'archival_only',
 	                sequence      => 0,
 	                state         => 'queued',

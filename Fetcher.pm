@@ -4,8 +4,9 @@ use strict;
 use DB;
 use MediaWords;
 use LWP::RobotUA;
+use URI::Escape;
 use Digest::MurmurHash qw(murmur_hash);
-
+use Perl6::Say;
 use constant FEED_NOT_STALE_FOR => 24*60*60;
 
 sub new
@@ -23,17 +24,16 @@ sub new
 sub do_fetch
 {
     my ( $download, $dbs, $type ) = @_;
+    my $url = URI::Escape::uri_unescape($download->{ url });
     my $response;
-    
-    my $ua = LWP::RobotUA->new('crawler bot (http://cyber.law.harvard.edu)',
-    											'mediawords@cyber.law.harvard.edu');
+    my $ua = LWP::RobotUA->new('crawler bot (http://cyber.law.harvard.edu)','mediawords@cyber.law.harvard.edu');
     $ua->timeout( 20 );
     $ua->max_size( 1024 * 1024 );
     $ua->max_redirect( 15 );
     $ua->delay(1/60);
 
 	if ($type eq "head"){
-		$response = $ua->head( $download->{ url } )				 
+		$response = $ua->head( $url )				 
 	}
 	# else null or "content"
 	else
@@ -41,7 +41,7 @@ sub do_fetch
 		$download->{ download_time } = 'now()';
 	    $download->{ state }         = 'fetching';
 	    $dbs->update_by_id( "downloads", $download->{ downloads_id }, $download );
-	    $response = $ua->get( $download->{ url } );
+	    $response = $ua->get( $url );
 	}
     return $response;
 }

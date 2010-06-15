@@ -1,6 +1,6 @@
 CREATE TYPE download_state AS ENUM ('error', 'fetching', 'pending', 'queued', 'success');    
 CREATE TYPE download_type  AS ENUM ('archival_only','content');    
-
+CREATE TYPE download_status  AS ENUM ('done','error','new');
 create table downloads (
     downloads_id        	serial          	primary key,
     parent              	int             	null,
@@ -18,6 +18,12 @@ create table downloads (
     mm_hash_url         	varchar(10)     	null,
     mm_hash_location            varchar(10)     	null,
     download_id_of_old_copy     int			null       
+);
+
+create table downloads_queue (
+client_id			int			not null,
+url				varchar(1024)		not null,
+status				download_status		not null		
 );
 
 CREATE VIEW downloads_sites as select regexp_replace(host, $q$^(.)*?([^.]+)\.([^.]+)$$q$ ,E'\\2.\\3') as site, * from downloads;
