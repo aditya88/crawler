@@ -84,24 +84,24 @@ sub _setup
 		print "read seeds";
 		while (<SEEDS>) 
 		{
-		# print data out before storing
-		my $url= $_;
-		chomp($url);
-        my $encoded_url = Handler::standardize_url($url);
-		$self->engine->dbs->create(
-                    'downloads',
-                    {
-	                parent        => 0,
-	                url           => $encoded_url,
-	                host          => lc( ( URI::Split::uri_split( uri_unescape($encoded_url) ) )[ 1 ] ),
-	                type          => 'archival_only',
-	                sequence      => 0,
-	                state         => 'queued',
-	                download_time => 'now()',
-	                extracted     => 'f',
-	                mm_hash_url   => Digest::MurmurHash::murmur_hash($url)
-	                }
-					 );
+			# print data out before storing
+			my $url= $_;
+			chomp($url);
+	        my $encoded_url = Handler::standardize_url($url);
+			$self->engine->dbs->create(
+	                    'downloads',
+	                    {
+		                parent        => 0,
+		                url           => $encoded_url,
+		                host          => lc( ( URI::Split::uri_split( uri_unescape($encoded_url) ) )[ 1 ] ),
+		                type          => 'archival_only',
+		                sequence      => 0,
+		                state         => 'queued',
+		                download_time => 'now()',
+		                extracted     => 'f',
+		                mm_hash_url   => Digest::MurmurHash::murmur_hash($url)
+		                }
+						 );
 		 }
 		my $dbs_result = $dbs->query( "SELECT * from downloads where state =  'queued'" );
 		my @queued_downloads = $dbs_result->hashes(); 
@@ -217,6 +217,43 @@ sub _queue_download_list
 
     return;
 }
+
+#checks if any new downloads present in downloads_queue table and  queue them in downloads table
+sub _queue_downloads_from_clients{
+	
+my $self = shift(@_);
+my $dbs = $self->engine->dbs;
+my @queued_downloads = $dbs->query( "SELECT * from downloads_queue where status = 'ready'" )->hashes();
+if ( @queued_downloads != 0 )
+{
+	print STDERR scalar( @queued_downloads ) . " new urls loaded from queue\n";
+	
+	for my $d ( @queued_downloads )
+    {
+    my $encoded_url = Handler::standardize_url($d->{ "url" });
+	$self->engine->dbs->create(
+	                    'downloads',
+	                    {
+		                parent        => 0,
+		                url           => $encoded_url,
+		                host          => lc( ( URI::Split::uri_split( uri_unescape($encoded_url) ) )[ 1 ] ),
+		                type          => 'archival_only',
+		                sequence      => 0,
+		                state         => 'queued',
+		                download_time => 'now()',
+		                extracted     => 'f',
+		                mm_hash_url   => Digest::MurmurHash::murmur_hash($d->{ "url" })
+		                }
+						 );
+    $self->{ downloads }->_queue_download( $d );
+    }
+}
+else 
+{
+	print STDERR "no new downloads";	
+}
+}
+
 
 #TODO combine _queue_download_list & _queue_download_list_per_site_limit
 sub _queue_download_list_with_per_site_limit

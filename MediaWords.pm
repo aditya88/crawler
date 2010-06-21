@@ -130,6 +130,7 @@ sub delete_by_id
 }
 
 # insert a row into the database for the given table with the given hash values and return the created row as a hash
+
 sub create
 {
     my ( $self, $table, $hash ) = @_;

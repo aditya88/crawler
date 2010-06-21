@@ -81,14 +81,15 @@ sub get_download_site_from_hostname
 sub _queue_download
 {
     my ( $self, $download ) = @_;
-
     my $media_id;
-
-    if ( ( $download->{ type } =~ /^spider_.*/ ) || ( $download->{ type } eq 'archival_only' ) )
+=comment
+    if ( $download->{ type } eq 'archival_only'  )
     {
+=cut
         my $host = $download->{ host };
         $host     = get_download_site_from_hostname( $host );
         $media_id = $host;
+=comment    
     }
     else
     {
@@ -99,6 +100,7 @@ sub _queue_download
             die( "missing media_id" );
         }
     }
+=cut
 
     #print STDERR "Provider _queue_download media_id $media_id\n";
 
@@ -109,6 +111,7 @@ sub _queue_download
 
     #my $download_serialized = $_serializer->freeze($download);
 
+=comment
     if ( $download->{ priority } && ( $download->{ priority } > 0 ) )
     {
         unshift( @{ $pending }, $download );
@@ -117,6 +120,7 @@ sub _queue_download
     {
         push( @{ $pending }, $download );
     }
+=cut
 
     $_downloads_count++;
 }
