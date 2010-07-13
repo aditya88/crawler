@@ -16,6 +16,10 @@ use Readonly;
 use Perl6::Say;
 use Digest::MurmurHash;
 use URI::Escape;
+use XML::Writer;
+use XML::Parser;
+use IO::File;
+use XML::Simple;
 
 # how often to download each feed (seconds)
 use constant STALE_FEED_INTERVAL => 3 * 14400;
@@ -31,6 +35,20 @@ use constant MAX_QUEUED_DOWNLOADS => 20000;
 
 # how often to check the database for new pending downloads (seconds)
 use constant DEFAULT_PENDING_CHECK_INTERVAL => 60;
+
+# how often to check downloads queue - seconds
+use constant DOWNLOADS_QUEUE_CHECK_INTERVAL => 10;
+
+# how often to check db for new requests to load a cache file - seconds
+##TODO change it to 60 
+use constant CACHE_FILE_LOADED_CHECK_INTERVAL => 5;
+
+
+# download check
+my $_last_downloads_queue_check = 0;
+
+# load requests to cache from db
+my $_last_cache_loaded_check = 0;
 
 # last time a stale feed check was run
 my $_last_stale_feed_check = 0;
@@ -75,34 +93,42 @@ sub _setup
     if ( !$_setup )
     {
         print STDERR "Provider _setup\n";
-        $_setup = 1;
-
+        $self->_load_requests_to_file();
+        
+        $_setup = 1;        
         my $dbs = $self->engine->dbs;
+        
 ##TODO load any config files and to be included in .yml file
-
-		open SEEDS, "<seeds.txt" or die $!;
-		print "read seeds";
-		while (<SEEDS>) 
-		{
-			# print data out before storing
-			my $url= $_;
-			chomp($url);
-	        my $encoded_url = Handler::standardize_url($url);
-			$self->engine->dbs->create(
-	                    'downloads',
-	                    {
-		                parent        => 0,
-		                url           => $encoded_url,
-		                host          => lc( ( URI::Split::uri_split( uri_unescape($encoded_url) ) )[ 1 ] ),
-		                type          => 'archival_only',
-		                sequence      => 0,
-		                state         => 'queued',
-		                download_time => 'now()',
-		                extracted     => 'f',
-		                mm_hash_url   => Digest::MurmurHash::murmur_hash($url)
-		                }
-						 );
-		 }
+		if(open SEEDS, "<seeds.txt")
+			{
+			print "read seeds";
+			while (<SEEDS>) 
+				{
+					# print data out before storing
+					my $url= $_;
+					chomp($url);
+			        my $encoded_url = Handler::standardize_url($url);
+					$self->engine->dbs->create(
+			                    'downloads',
+			                    {
+				                parent        => 0,
+				                url           => $encoded_url,
+				                host          => lc( ( URI::Split::uri_split( uri_unescape($encoded_url) ) )[ 1 ] ),
+				                type          => 'archival_only',
+				                sequence      => 0,
+				                state         => 'queued',
+				                download_time => 'now()',
+				                extracted     => 'f',
+				                mm_hash_url   => Digest::MurmurHash::murmur_hash($url)
+				                }
+								 );
+				 }
+			}
+		else
+			{
+				 print STDERR "no seeds file from local server";
+			}
+		
 		my $dbs_result = $dbs->query( "SELECT * from downloads where state =  'queued'" );
 		my @queued_downloads = $dbs_result->hashes(); 
 		print STDERR "Provider _setup queued_downloads array length = " . scalar( @queued_downloads ) . "\n";
@@ -115,6 +141,7 @@ sub _setup
 
 sub _timeout_stale_downloads
 {
+	print STDERR "_timeout_stale_downloads";
     my ( $self ) = @_;
     
     if ( $_last_stale_download_check > ( time() - STALE_DOWNLOAD_INTERVAL ) )
@@ -141,14 +168,14 @@ sub _timeout_stale_downloads
 # this subroutine expects to be executed in a transaction
 sub _add_stale_feeds
 {
+	print STDERR "start _add_stale_feeds\n";
+	 
     my ( $self ) = @_;
 
     if ( ( time() - $_last_stale_feed_check ) < STALE_FEED_CHECK_INTERVAL )
     {
         return;
     }
-
-    print STDERR "start _add_stale_feeds\n";
 
     $_last_stale_feed_check = time();
 
@@ -222,39 +249,116 @@ sub _queue_download_list
 sub _queue_downloads_from_clients{
 	
 my $self = shift(@_);
+if ( ( time() - $_last_downloads_queue_check ) < DOWNLOADS_QUEUE_CHECK_INTERVAL )
+   {
+   return;
+   }
+   $_last_downloads_queue_check =time();
+print STDERR "\n in _queue_downloads_from_client";
+
 my $dbs = $self->engine->dbs;
-my @queued_downloads = $dbs->query( "SELECT * from downloads_queue where status = 'ready'" )->hashes();
-if ( @queued_downloads != 0 )
+my @queued_requests = $dbs->query( "SELECT * from requests where status = 'ready'" )->hashes();
+
+if ( @queued_requests != 0 )
 {
-	print STDERR scalar( @queued_downloads ) . " new urls loaded from queue\n";
-	
-	for my $d ( @queued_downloads )
-    {
-    my $encoded_url = Handler::standardize_url($d->{ "url" });
-	$self->engine->dbs->create(
-	                    'downloads',
-	                    {
-		                parent        => 0,
-		                url           => $encoded_url,
-		                host          => lc( ( URI::Split::uri_split( uri_unescape($encoded_url) ) )[ 1 ] ),
-		                type          => 'archival_only',
-		                sequence      => 0,
-		                state         => 'queued',
-		                download_time => 'now()',
-		                extracted     => 'f',
-		                mm_hash_url   => Digest::MurmurHash::murmur_hash($d->{ "url" })
-		                }
-						 );
-    $self->{ downloads }->_queue_download( $d );
-    }
+	my $req;
+	for $req (@queued_requests) {
+		my @queued_downloads = $dbs->query( "SELECT * from downloads_queue where request_id = ?",$req->{ request_id } )->hashes();
+		for my $d ( @queued_downloads )
+		    {
+		    my $encoded_url = Handler::standardize_url($d->{ "url" });
+		    my $request = $self->engine->dbs->find_by_id('requests',$d->{ "request_id" });
+		    
+			my $new_request_seed = $self->engine->dbs->create(
+									                    'downloads',
+									                    {
+									                    request_id    =>$d->{ "request_id" },
+										                parent        => 0,
+										                url           => $encoded_url,
+										                host          => lc( ( URI::Split::uri_split( uri_unescape($encoded_url) ) )[ 1 ] ),
+										                type          => $request->{ "download_type" },
+										                sequence      => 0,
+										                download_time =>'now()',
+										                state         => 'pending',
+										                extracted     => 'f',
+										                mm_hash_url   => Digest::MurmurHash::murmur_hash($d->{ "url" })
+										                }
+														 );
+			 $d->{ status } = "queued";
+			 $self->engine->dbs->update_by_id( 'downloads_queue', $d->{ url_id }, $d );
+			 $self->{ downloads }->_queue_download($new_request_seed);
+			 }
+		print STDERR "\n",scalar( @queued_downloads )," new urls loaded from request id ",$req->{ request_id };
+		$req->{ status } = "queued";
+		$dbs->update_by_id("requests",$req->{ request_id },$req);
+    	}
+    $self->engine->dbs->commit();
 }
 else 
 {
-	print STDERR "no new downloads";	
-}
+	print STDERR "\n no new requests from clients";	
 }
 
+}
 
+sub _load_requests_to_file{
+	
+	if ( ( time() - $_last_cache_loaded_check ) < CACHE_FILE_LOADED_CHECK_INTERVAL )
+   	{
+   	return;
+   	}
+   	
+	$_last_cache_loaded_check = time();
+ 	
+	my($self) = @_;
+	my $reqs_file_handle;
+	my $dbs = $self->engine->dbs;
+	my $requests = $dbs->query("SELECT * FROM requests WHERE status = 'ready' ");
+	my @requests_array = $requests->hashes();
+	if(int(@requests_array) == 0){
+		print STDERR "\n no requests at all !!";
+		return;
+	}
+=comment
+	$temp_reqs_file = File::Temp->new(TEMPLATE => 'tempXXXXX',
+                        						DIR => './temp/',
+                        							SUFFIX => '.dat');
+=cut
+
+	$reqs_file_handle = new IO::File "> ./temp/Cache.xml";
+	flock $reqs_file_handle,2 ;
+	##Temporary fix - writing all data from requests to 
+	my $xml = new XML::Simple (NoAttr=>1, RootName=>'requests');
+	print Dumper(@requests_array);
+	my ($data,$def) ;
+	$data = $xml->XMLout(\@requests_array);
+	print STDERR $data;
+	print $reqs_file_handle $data;
+	#print Dumper($data);
+	flock $reqs_file_handle,8;
+	$reqs_file_handle->close();
+	
+=comment
+		
+		my $writer = new XML::Writer(OUTPUT => $reqs_file_handle,NEWLINES => 1);
+		$writer->startTag('requests');
+		foreach my $request (@requests_array) {
+		
+		$writer->emptyTag('request','request_id'=>$requests->{ request_id },
+									'client_id'=>$request->{ client_id },
+									'user_agent'=>$request->{ user_agent },
+									'download_type'=>$request->{ download_type },
+									'refresh_rate'=>$request->{ refresh_rate },
+									'depth_of_search'=>$request->{ depth_of_search },
+									'allowed_content'=>$request->{ allowed_content },
+									'status'=>$request->{ request_status }
+									);
+									
+		}
+		$writer->endTag('requests');
+		$writer->end();
+=cut
+}
 #TODO combine _queue_download_list & _queue_download_list_per_site_limit
 sub _queue_download_list_with_per_site_limit
 {
@@ -359,6 +463,8 @@ sub _add_pending_downloads
 
         $self->_queue_download_list( \@site_downloads );
     }
+    
+    print STDERR "end _add_pending_downloads";
 }
 
 sub _get_pending_downloads_for_site
@@ -380,50 +486,53 @@ sub _get_pending_downloads_for_site
 
 # return the next pending request from the downloads table
 # that meets the throttling requirement
-
 sub provide_downloads
 {
     my ( $self ) = @_;
     sleep( 1 );
+    
     $self->_setup();
+    
+    $self->_load_requests_to_file();
     
     $self->_timeout_stale_downloads();
     
     $self->_add_stale_feeds();
 
     $self->_add_pending_downloads();
-
+    
+    $self->_queue_downloads_from_clients();
+    
     my @downloads;
   MEDIA_ID:
     for my $media_id ( @{ $self->{ downloads }->_get_download_media_ids } )
     {
-
+	#print "\n media id is $media_id ";
         # we just slept for 1 so only bother calling time() if throttle is greater than 1
         if ( ( $self->engine->throttle > 1 ) && ( $media_id->{ time } > ( time() - $self->engine->throttle ) ) )
         {
-
             print STDERR "provide downloads: skipping media id $media_id->{media_id} because of throttling\n";
-
             #skip;
             next MEDIA_ID;
         }
-
+        
         foreach ( 1 .. 3 )
         {
             if ( my $download = $self->{ downloads }->_pop_download( $media_id->{ media_id } ) )
             {
+            	print "\n dumper is ",Dumper($download);
                 push( @downloads, $download );
             }
         }
     }
-
+    
     print STDERR "provide downloads: " . scalar( @downloads ) . " downloads\n";
 
     if ( !@downloads )
     {
         sleep( 10 );
     }
-    print @downloads."out 1\n";
+#    print @downloads."out 1\n";
     return \@downloads;
 }
 

@@ -5,21 +5,20 @@ use strict;
 use Data::Dumper;
 use base qw(Net::Server::PreFork);
 use Switch;
-use DB;
 use Perl6::Say;
 
 sub new{
-	my ( $class,$engine ,$port ) = @_;
+	my ( $class,$port ) = @_;
 	my $self = {};
     bless( $self, $class );
-    $self->engine( $engine );
+    $self->reconnect_db();
 	return $self;
 }
 
 sub make_request{
 	my ($self,$client_id) = @_;
 	print STDERR "\n $client_id is the client id that requested new download";
-	my $dbs = $self->engine->dbs;
+	my $dbs = $self->dbs;
 	my $row = $dbs->create(
 					            'requests',
 					            {
@@ -35,11 +34,12 @@ sub make_request{
 	my $row = $dbs->find_by_id("requests",$last_insert_id)->hash;
 	return $row->{ request_id };
 =cut
+
 }
 
 sub handle_queue{
 	my ($self,$client_id,$request_id,@urls) = @_;
-	my $dbs = $self->engine->dbs;
+	my $dbs = $self->dbs;
 #	print STDERR @urls;
 #	shift(@urls);
 	if($self->validate($client_id,$request_id))
@@ -60,7 +60,7 @@ sub handle_queue{
 sub validate{
 	
 	my($self,$client_id,$request_id)=@_;
-	my $dbs = $self->engine->dbs;
+	my $dbs = $self->dbs;
 	my $result = $dbs->query("SELECT client_id FROM requests WHERE request_id=?",$request_id)->hash;
 	if ($result->{ client_id } == $client_id){
 		return 1;
@@ -69,17 +69,27 @@ sub validate{
 		return 0;
 	}
 }
+
 sub make_settings{
 	my($self,$client_id,$request_id,$case,@tokens) = @_;
 	if($self->validate($client_id,$request_id)){
 		
-		my $dbs = $self->engine->dbs;
+		my $dbs = $self->dbs;
 		my $request = $dbs->find_by_id( 'requests', $request_id );
         if ( !$request ) 
         { 
         	die( "error" ); 
         }
-        $request->{ $case } = shift(@tokens);
+        if ($case eq "commit_request")
+        {
+        	print STDERR "Commit request";
+        	$request->{ status } = "ready";
+        }
+        else
+        {
+        	$request->{ $case } = shift(@tokens);
+        }
+        
 #        print STDERR $request->{ $case }; 
         $dbs->update_by_id( "requests", $request->{ request_id }, $request );
         $dbs->commit();
@@ -110,7 +120,7 @@ sub process_request {
 		 		{
 		 			$self->handle_queue($client_id,$request_id,@tokens);
 		 		}
-		 		case (/"downloads_type"||"depth_of_search"||"refresh_rate"||"allowed_content"/)
+		 		case (/"downloads_type"||"depth_of_search"||"refresh_rate"||"allowed_content"||"commit_request"/)
 		 		{
 		 			print STDERR "switch done";
 					$self->make_settings($client_id,$request_id,$case,@tokens);		 			
@@ -133,14 +143,30 @@ sub post_accept_hook()
 {
 }
 
-sub engine
+sub dbs
 {
-    if ( $_[ 1 ] )
+    my ( $self, $dbs ) = @_;
+
+    if ( $dbs )
     {
-        $_[ 0 ]->{ engine } = $_[ 1 ];
+        die( "use $self->reconnect_db to connect to db" );
     }
-    return $_[ 0 ]->{ engine };
+
+    defined( $self->{ dbs } ) || die "no database";
+
+    return $self->{ dbs };
 }
 
+sub reconnect_db
+{
+    my ( $self ) = @_;
+
+    if ( $self->{ dbs } )
+    {
+        $self->dbs->disconnect;
+    }
+    $self->{ dbs } = DB->connect_to_db;
+    $self->dbs->dbh->{ AutoCommit } = 0;
+}
 
 1;

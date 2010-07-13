@@ -24,7 +24,7 @@ use HTML::LinkExtractor;
 use URI::URL;
 use Digest::MurmurHash;
 use URI::Escape;
-use Downloads;
+use File::Path;
 
 # CONSTANTS
 
@@ -51,8 +51,9 @@ sub new
 # chop out the content if we don't allow the content type
 sub _restrict_content_type
 {
-    my ( $self, $response ) = @_;
+    my ( $self, $response , $content_type) = @_;
 
+##TODO not using content type here nedd to change it in fetcher it selfwhile getting the head
     if ( $response->content_type =~ m~text|html|xml|rss|atom~i )
     {
         return;
@@ -121,6 +122,8 @@ sub _call_pager
     my %hash_links   = map { $_, 1 } @links;
     my @unique_links = keys %hash_links;
     
+    print STDERR @unique_links;
+    
     my $j=0;
     foreach $j (@unique_links) 
     {
@@ -128,6 +131,7 @@ sub _call_pager
 		            'downloads',
 		            {
 		                parent        => $download->{ downloads_id },
+		                request_id	  => $download->{ request_id },
 		                url           => $j,
 		                host          => lc( ( URI::Split::uri_split( uri_unescape($j) ) )[ 1 ] ),
 		                type          => 'archival_only',
@@ -202,7 +206,7 @@ sub handle_response
 
     # say STDERR "fetcher " . $self->engine->fetcher_number . " starting restrict content type";
 
-    $self->_restrict_content_type( $response );
+    $self->_restrict_content_type( $response ,$download->{ allowed_content } );
 
     # say STDERR "fetcher " . $self->engine->fetcher_number . " starting reset";
     # may need to reset download url to the last redirect url
@@ -217,9 +221,9 @@ sub handle_response
     {
         case ('cond1')
         {
-        	if ( $download->{ sequence } > MAX_PAGES )
+        	if ( $download->{ sequence } > $download->{ depth_of_search } )
     			{
-			        print "reached max pages (" . MAX_PAGES . ") for url " . $download->{ url } . "\n";
+			        print "reached max pages (" . MAX_PAGES . ") for url " . $download->{ url } . "from the request with request_id ".$download->{ request_id }."\n";
 			        return;
     			}
     		else
@@ -236,7 +240,7 @@ sub handle_response
         }
         case ('cond2')
         {
-        	Downloads::store_content( $dbs, $download, \$response->decoded_content );
+        	store_content( $dbs, $download, \$response->decoded_content );
         	#path, is set and state updated to success
         	$download->{ download_id_of_old_copy } = $response -> { downloads_id } ;
             $download->{ location } = $response->request->url;
@@ -252,21 +256,89 @@ sub handle_response
         }
         case ('cond4')
         {
-        	Downloads::store_content( $dbs, $download, \$response->decoded_content );
+        	store_content( $dbs, $download, \$response->decoded_content );
         	$download->{ location } = $response->request->url;
         	$download->{ mm_hash_location } = Digest::MurmurHash::murmur_hash($response->request->url);
         	$dbs->update_by_id( "downloads", $download->{ downloads_id }, $download );
             $self->_process_content( $download, $response );
+        }
+        case ('cond5')
+        {
+        	$response->content( '(unsupported content type)' );
+        	$download->{ error_message } = "unsupported content type";
+        	$dbs->update_by_id( "downloads", $download->{ downloads_id }, $download );
         }
         else
         {
             die "Unknown download type " . $download->{ type }, "\n";
         }
         
-        
     }
 }
 
+# get the parent of this download
+sub get_parent
+{
+    my ( $db, $download ) = @_;
+
+    if ( !$download->{ parent } )
+    {
+        return undef;
+    }
+
+    return $db->query( "select * from downloads where downloads_id = ?", $download->{ parent } )->hash;
+}
+
+# store the download content in the file system
+sub store_content
+{
+    my ( $db, $download, $content_ref ) = @_;
+
+    
+    my $feed = $db->query( "select * from downloads where downloads_id = ?", $download->{ downloads_id } )->hash;
+
+    my $t = DateTime->now;
+
+    my $config = CConfig->get_config;
+    my $data_dir = $config->{ mediawords }->{ data_content_dir } || $config->{ mediawords }->{ data_dir };
+
+    my @path = (
+        'content',
+        sprintf( "%04d", $t->year ),
+        sprintf( "%02d", $t->month ),
+        sprintf( "%02d", $t->day ),
+        sprintf( "%02d", $t->hour ),
+        sprintf( "%02d", $t->minute )
+    );
+    for ( my $p = get_parent( $db, $download ) ; $p ; $p = get_parent( $db, $p ) )
+    {
+        push( @path, $p->{ downloads_id } );
+    }
+
+    my $rel_path = join( '/', @path );
+    my $abs_path = "$data_dir/$rel_path";
+
+    mkpath( $abs_path );
+
+    my $rel_file = "$rel_path/" . $download->{ downloads_id } . ".gz";
+    my $abs_file = "$data_dir/$rel_file";
+
+    my $encoded_content = Encode::encode( 'utf-8', $$content_ref );
+
+    # print STDERR "file path '$abs_file'\n";
+
+    if ( !( IO::Compress::Gzip::gzip \$encoded_content => $abs_file ) )
+    {
+        my $error = "Unable to gzip and store content: $IO::Compress::Gzip::GzipError";
+        $db->query( "update downloads set state = ?, error_message = ? where downloads_id = ?",
+            'error', $error, $download->{ downloads_id } );
+    }
+    else
+    {
+        $db->query( "update downloads set state = ?, path = ? where downloads_id = ?",
+            'success', $rel_file, $download->{ downloads_id } );
+    }
+}
 # calling engine
 sub engine
 {

@@ -30,7 +30,7 @@ sub get_config
     }
 
     # TODO: This should be standardized
-    set_config_file( $_base_dir . '/mediawords.yml' );
+    set_config_file( $_base_dir . '/MCrawler_config.yml' );
 
     return $_config;
 }

@@ -82,13 +82,16 @@ sub _queue_download
 {
     my ( $self, $download ) = @_;
     my $media_id;
+
 =comment
     if ( $download->{ type } eq 'archival_only'  )
     {
 =cut
+
         my $host = $download->{ host };
         $host     = get_download_site_from_hostname( $host );
-        $media_id = $host;
+        $media_id = $host;    
+
 =comment    
     }
     else
@@ -111,7 +114,7 @@ sub _queue_download
 
     #my $download_serialized = $_serializer->freeze($download);
 
-=comment
+
     if ( $download->{ priority } && ( $download->{ priority } > 0 ) )
     {
         unshift( @{ $pending }, $download );
@@ -120,7 +123,7 @@ sub _queue_download
     {
         push( @{ $pending }, $download );
     }
-=cut
+
 
     $_downloads_count++;
 }
@@ -130,9 +133,8 @@ sub _pop_download
 {
     my ( $self, $media_id ) = @_;
     $_downloads->{ $media_id }->{ time } = time;
-
     $_downloads->{ $media_id }->{ queued } ||= [];
-
+    
     my $download_serialized = shift( @{ $_downloads->{ $media_id }->{ queued } } );
     my $download            = $download_serialized;
 
@@ -148,7 +150,7 @@ sub _pop_download
 sub _get_download_media_ids
 {
     my ( $self ) = @_;
-
+    
     return [ map{ { media_id => $_, time => $_downloads->{ $_ }->{ time } } } keys( %{ $_downloads } ) ];
 }
 
@@ -212,7 +214,6 @@ sub _get_downloads_size
     {
         $self->_verify_downloads_count();
     }
-
     return $_downloads_count;
 }
 

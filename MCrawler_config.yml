@@ -1,0 +1,28 @@
+---
+name: MCrawler
+
+### database settings. at least one database connection must be defined
+database:
+    - label : "LABEL"
+      type  : "pg"
+      host  : "localhost"
+      db    : "crawlerdb"
+      user  : "crawler"
+      pass  : "crawler"
+
+
+#session:
+    #expires: 3600
+    
+    ### directory where web app sessions are stored.  default to $homedir/tmp
+    #storage: "~/tmp/mediawords-session"
+
+#mediawords:
+    ### defaults to http://$hostname:$port/.
+    #base_url: "http://your.mediacloud.server/and/path"
+    
+    ### parent directory of the content/ directory with all downloaded content is stored
+    #data_dir: "<bindir>/../data"
+
+    ### script directory
+    #script_dir: "<bindir>/../script"

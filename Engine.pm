@@ -18,6 +18,10 @@ use Fcntl;
 use IO::Select;
 use IO::Socket;
 use Data::Dumper;
+use threads;
+use threads::shared;
+use Perl6::Say;
+use IO::File;
 
 use Fetcher;
 use Handler;
@@ -42,6 +46,46 @@ sub new
     return $self;
 }
 
+# add its property from cache file
+sub _add_attributes{
+	my($self,$download)=@_;
+	my($cache_file_handler,$xml,$data,$line,$file);
+	open($cache_file_handler,"< ./temp/Cache.xml");
+	
+	flock($cache_file_handler,1);
+		while($line = <$cache_file_handler>)
+		{
+	    chomp($line);
+	    $file = $file.$line;
+	    }
+	flock($cache_file_handler,8);
+	
+	$xml = new XML::Simple (KeyAttr=>'request_id');
+	$data = $xml->XMLin($file);
+	
+	print STDERR Dumper($data);
+	print STDERR Dumper($download);
+	if ($data->{ anon }->{ $download->{ request_id } }->{ client_id } eq undef){
+		
+		$download -> { _client_id } = $data->{ anon }->{ client_id };
+		$download -> { _user_agent } = $data->{ anon }->{ user_agent };
+		$download -> { _download_type } = $data->{ anon }->{ download_type };
+		$download -> { _refresh_rate } = $data->{ anon }->{ refresh_rate };
+		$download -> { _depth_of_search } = $data->{ anon }->{ depth_of_search };
+		$download -> { _allowed_content } = $data->{ anon }->{ allowed_content };
+	}
+	else{
+		
+		$download -> { _client_id } = $data->{ anon }->{ $download->{ request_id } }->{ client_id };
+		$download -> { _user_agent } = $data->{ anon }->{ $download->{ request_id } }->{ user_agent };
+		$download -> { _download_type } = $data->{ anon }->{ $download->{ request_id } }->{ download_type };
+		$download -> { _refresh_rate } = $data->{ anon }->{ $download->{ request_id } }->{ refresh_rate };
+		$download -> { _depth_of_search } = $data->{ anon }->{ $download->{ request_id } }->{ depth_of_search };
+		$download -> { _allowed_content } = $data->{ anon }->{ $download->{ request_id } }->{ allowed_content };
+	}
+	print "after adding attributes ",Dumper($download);
+	return $download ;
+}
 # continually loop through the provide, fetch, respond cycle
 # for one crawler process
 sub _run_fetcher
@@ -65,7 +109,6 @@ sub _run_fetcher
         eval {
         	
             $download = 0;
-
             $self->reconnect_db;
 
             # tell the parent provider we're ready for another download
@@ -80,19 +123,19 @@ sub _run_fetcher
 
             if ( $downloads_id && ( $downloads_id ne 'none' ) )
             {
-
                 # print STDERR "fetcher " . $self->fetcher_number . " get downloads_id: '$downloads_id'\n";
-
+                
                 $download = $self->dbs->find_by_id( 'downloads', $downloads_id );
                 if ( !$download )
                 {
                     die( "fetcher " . $self->fetcher_number . ": Unable to find download_id: $downloads_id" );
                 }
                 
-				print $download->{downloads_id}." is the download  provided for fetcher";
+				print $download->{ downloads_id }." is the download  provided for fetcher";
+				
+				$download = $self->_add_attributes($download);
                 my ($cond,$response) = $fetcher->fetch_download( $download );
                 $handler->handle_response( $download, $cond, $response );
-                
                 print STDERR "fetcher " . $self->fetcher_number . " get downloads_id: '$downloads_id' " .
                   $download->{ url } . " complete\n";
             }
@@ -179,8 +222,8 @@ sub crawl
             print STDERR "crawler timed out\n";
             last;
         }
-
-        #print "wait for fetcher requests ...\n";
+	 
+        print "wait for fetcher requests ...\n";
         for my $s ( $socket_select->can_read() )
         {
             my $fetcher_number = $s->getline();
@@ -200,18 +243,16 @@ sub crawl
             {
                 print STDERR "refill queued downloads ...\n";
                 $queued_downloads = $provider->provide_downloads();
-                
             }
 
             if ( my $queued_download = shift( @{ $queued_downloads } ) )
             {
 
-                #print STDERR "sending fetcher $fetcher_number download:" . $queued_download->{downloads_id} . "\n";
+                print STDERR "sending fetcher $fetcher_number download:" . $queued_download->{downloads_id} . "\n";
                 $s->print( $queued_download->{ downloads_id } . "\n" );
             }
             else
             {
-
                 #print STDERR "sending fetcher $fetcher_number none\n";
                 $s->print( "none\n" );
                 last;
@@ -347,8 +388,13 @@ sub start_server
 {
 	my ( $self ) = @_;
 	my $port = PORT;
-	my $server = MServer->new($self);
-	$server->run(port => $port,host =>'localhost');
+	my $thr = threads->create(
+							sub { 
+								my $server = MServer->new();
+								$server->run(port => $port,host =>'localhost');
+							});
+	print STDERR "Server Started";
+	return;
 }
 
 1;

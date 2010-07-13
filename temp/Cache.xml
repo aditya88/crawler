@@ -1,0 +1,12 @@
+<requests>
+  <anon>
+    <allowed_content>text|html</allowed_content>
+    <client_id>8989</client_id>
+    <depth_of_search>3</depth_of_search>
+    <download_type>archival_only</download_type>
+    <refresh_rate>86400</refresh_rate>
+    <request_id>1</request_id>
+    <status>ready</status>
+    <user_agent></user_agent>
+  </anon>
+</requests>

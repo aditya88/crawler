@@ -23,17 +23,27 @@ sub new
 
 sub do_fetch
 {
+	
     my ( $download, $dbs, $type ) = @_;
     my $url = URI::Escape::uri_unescape($download->{ url });
-    my $response;
-    my $ua = LWP::RobotUA->new('crawler bot (http://cyber.law.harvard.edu)','mediawords@cyber.law.harvard.edu');
+    my ($response,$ua);
+    # make default
+    print $download->{ _user_agent } ;
+    if ($download->{ _user_agent } eq "")
+    {
+    	$ua = LWP::RobotUA->new('crawler bot (http://cyber.law.harvard.edu)','amaddula@cyber.law.harvard.edu');
+    }
+    else
+    {
+    	$ua = LWP::RobotUA->new($download -> { _user_agent },'amaddula@cyber.law.harvard.edu');
+    }
     $ua->timeout( 20 );
     $ua->max_size( 1024 * 1024 );
     $ua->max_redirect( 15 );
     $ua->delay(1/60);
 
 	if ($type eq "head"){
-		$response = $ua->head( $url )				 
+		$response = $ua->head( $url )
 	}
 	# else null or "content"
 	else
@@ -44,6 +54,7 @@ sub do_fetch
 	    $response = $ua->get( $url );
 	}
     return $response;
+	
 }
 
 sub fetch_download
@@ -54,9 +65,17 @@ sub fetch_download
     
     # FIXME - need to handle redirect manually, sticking them back into the queue as downloads
     # so that the host throttling works as it should
-    #print "fetcher " . $self->engine->fetcher_number . " download: " . $download->{url} . "\n";
+    # print "fetcher " . $self->engine->fetcher_number . " download: " . $download->{url} . "\n";
     
     my $download_head = do_fetch( $download, $dbs,"head");
+    
+    #content type checking in header
+    if ( !($download_head->content_type =~ $download->{ _allowed_content }) )
+    {
+    	#content_type not supported
+        return('cond5');
+    }
+    
     my $hash = murmur_hash( Handler::standardize_url($download_head->base) );
     my @out ;
     @out = $dbs -> query('SELECT * FROM downloads WHERE mm_hash_location=? ORDER  by downloads_id DESC',$hash )->hashes();
@@ -66,7 +85,8 @@ sub fetch_download
     	return ('cond4', do_fetch( $download, $dbs,"content") );
     }
     else {
-	        if ( time() - ( $out[0] -> { download_time } ) > FEED_NOT_STALE_FOR)
+    	# changing FEED_NOT_STALE_FOR to client specified value
+	        if ( time() - ( $out[0] -> { download_time } ) > $download -> { _refresh_rate })
 	        {
 	        	if (str2time($download_head->header('last-modified')) < $out[0] -> { download_time } )
 	        	{
@@ -76,7 +96,7 @@ sub fetch_download
 	        	}
 	        	else
 	        	{
-	        		# cond2 make new copy since download is stale and header is modiied
+	        		# cond2 make new copy since download is stale and header is modified
 	        		return ( 'cond2', do_fetch( $download, $dbs,"content") );
 	        	}
 	        }
